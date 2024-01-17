@@ -22,7 +22,6 @@ import torchmetrics
 import os
 import argparse
 import numpy as np
-from mpi4py import MPI
 
 import pytorch_lightning as pl
 
@@ -35,7 +34,7 @@ from loss_landscapes.model_interface.model_interface import wrap_model
 
 from ip_explorer.datamodules import get_datamodule_wrapper
 from ip_explorer.models import get_model_wrapper
-from ip_explorer.landscape.loss import EnergyForceLoss
+from ip_explorer.landscape.loss import DSLoss
 
 logging.getLogger("pytorch_lightning").setLevel(logging.WARNING)
 
@@ -85,14 +84,10 @@ print(args)
 
 # Seed RNGs
 if args.seed is None:
-    comm = MPI.COMM_WORLD
-    rank = comm.Get_rank()
 
     local_seed = np.random.randint(1000)
 
-    global_seed = int(np.average(comm.allgather(local_seed)))
-
-    args.seed = global_seed
+    args.seed = local_seed
 
     logging.info(f"Random seed must be consistent across all processes to ensure landscape correctness. Settting to {args.seed}")
 
@@ -104,11 +99,9 @@ random.seed(args.seed)
 torch.backends.cudnn.benchmark = False
 torch.backends.cudnn.deterministic = True
 
+rank = 0
 
 def main():
-
-    comm = MPI.COMM_WORLD
-    rank = comm.Get_rank()
 
     # Setup
     if args.landscape_type == 'lines':
@@ -118,8 +111,6 @@ def main():
     if rank == 0:
         if not os.path.isdir(args.save_dir):
             os.makedirs(args.save_dir)
-
-    comm.Barrier()  # wait for save directory to be created
 
     os.chdir(args.save_dir)
 
@@ -152,7 +143,7 @@ def main():
 
     if args.compute_initial_losses:
         if rank == 0:
-            model.values_to_compute = ['energies_and_forces']
+            model.values_to_compute = ['DS']
 
             # TODO: use devices=1 for train/test/val verification to avoid
             # duplicating data, as suggested on this page:
@@ -179,45 +170,41 @@ def main():
 
                 trainer.test(model, dataloaders=dset)
 
-                true_energies = model.results['true_energies']
-                pred_energies = model.results['pred_energies']
+                true_DS = model.results['true_DS']
+                pred_DS = model.results['pred_DS']
 
-                true_forces = model.results['true_forces']
-                pred_forces = model.results['pred_forces']
 
-                np.savetxt(
-                    os.path.join(args.save_dir, args.prefix+f'true_{name}_energies_'+args.model_type+'.npy'),
-                    true_energies,
-                )
+                # np.savetxt(
+                #     os.path.join(args.save_dir, args.prefix+f'true_{name}_energies_'+args.model_type+'.npy'),
+                #     true_energies,
+                # )
 
-                np.savetxt(
-                    os.path.join(args.save_dir, args.prefix+f'pred_{name}_energies_'+args.model_type+'.npy'),
-                    pred_energies,
-                )
+                # np.savetxt(
+                #     os.path.join(args.save_dir, args.prefix+f'pred_{name}_energies_'+args.model_type+'.npy'),
+                #     pred_energies,
+                # )
 
-                np.savetxt(
-                    os.path.join(args.save_dir, args.prefix+f'true_{name}_forces_'+args.model_type+'.npy'),
-                    true_forces,
-                )
+                # np.savetxt(
+                #     os.path.join(args.save_dir, args.prefix+f'true_{name}_forces_'+args.model_type+'.npy'),
+                #     true_forces,
+                # )
 
-                np.savetxt(
-                    os.path.join(args.save_dir, args.prefix+f'pred_{name}_forces_'+args.model_type+'.npy'),
-                    pred_forces,
-                )
+                # np.savetxt(
+                #     os.path.join(args.save_dir, args.prefix+f'pred_{name}_forces_'+args.model_type+'.npy'),
+                #     pred_forces,
+                # )
 
                 rmse_values[name] = {
-                    'energy': np.sqrt(np.average((true_energies - pred_energies)**2)),
-                    'forces': np.sqrt(np.average((true_forces - pred_forces)**2)),
+                    'DS': np.sqrt(np.average((true_DS - pred_DS)**2)),
                 }
 
-            print('E_RMSE (eV/atom), F_RMSE (eV/Ang)')
-            print(f'\tTrain:\t{rmse_values["train"]["energy"]}, \t{rmse_values["train"]["forces"]}')
+            print('DS_RMSE (kcal/mol)')
+            print(f'\tTrain:\t{rmse_values["train"]["DS"]}')
             # print(f'\tTest:\t{rmse_values["test"]["energy"]}, \t{rmse_values["test"]["forces"]}')
             # print(f'\tVal:\t{rmse_values["val"]["energy"]}, \t{rmse_values["val"]["forces"]}')
 
             model.values_to_compute = ['loss']
 
-    comm.Barrier()  # make sure rank=0 is done with single-GPU calculation
 
     if not args.compute_landscape:
         return
@@ -273,12 +260,12 @@ def main():
         num_nodes=args.num_nodes,
         devices=args.gpus_per_node,
         accelerator='cuda',
-        strategy='ddp',
+#        strategy='ddp',
         enable_progress_bar=False,
         inference_mode=False,
     )
 
-    metric = EnergyForceLoss(
+    metric = DSLoss(
         evaluation_fxn=trainer.test,
         data_loader=datamodule.train_dataloader(),
         aggregation_method=args.aggregation_method,
@@ -296,7 +283,8 @@ def main():
             n_loss_terms=2,
         )
 
-        loss_data_fin = np.transpose(loss_data_fin, axes=(2,0,1))
+        # It is not needed, because there is no second loss value
+        # loss_data_fin = np.transpose(loss_data_fin, axes=(2,0,1))
 
     elif args.landscape_type == 'plane':
         loss_data_fin = loss_landscapes.random_plane(
@@ -310,17 +298,20 @@ def main():
         )
 
     if rank == 0:
-        save_name = '{}={}_d={:.2f}_s={}_'.format(args.landscape_type, 'energy', distance, args.steps)
+        save_name = '{}={}_d={:.2f}_s={}_'.format(args.landscape_type, 'DS', distance, args.steps)
         if args.landscape_type == 'lines':
             save_name += f'{args.n_lines}_'
         full_path = os.path.join(args.save_dir, args.prefix+save_name+args.model_type)
-        np.save(full_path, loss_data_fin[0])
+        #np.save(full_path, loss_data_fin[0])
+        np.save(full_path, loss_data_fin)
+        print(loss_data_fin)
+        
 
-        save_name = '{}={}_d={:.2f}_s={}_'.format(args.landscape_type, 'forces', distance, args.steps)
-        if args.landscape_type == 'lines':
-            save_name += f'{args.n_lines}_'
-        full_path = os.path.join(args.save_dir, args.prefix+save_name+args.model_type)
-        np.save(full_path, loss_data_fin[1])
+        # save_name = '{}={}_d={:.2f}_s={}_'.format(args.landscape_type, 'forces', distance, args.steps)
+        # if args.landscape_type == 'lines':
+        #     save_name += f'{args.n_lines}_'
+        # full_path = os.path.join(args.save_dir, args.prefix+save_name+args.model_type)
+        # np.save(full_path, loss_data_fin[1])
 
         print("Saving results in:", args.save_dir)
 
@@ -329,27 +320,5 @@ def main():
 
 if __name__ == '__main__':
     os.environ['GPUS_PER_NODE'] = str(args.gpus_per_node)
-
-    comm = MPI.COMM_WORLD
-    rank = comm.Get_rank()
-
-    print(f'[rank={rank}] MASTER ADDR:', os.environ['MASTER_ADDR'])
-    print(f'[rank={rank}] MASTER PORT:', os.environ['MASTER_PORT'])
-
-    # Thanks to Adam T. Moody for helping me set this up!
-    if 'OMPI_COMM_WORLD_RANK' in os.environ:
-        os.environ["RANK"] = os.environ['OMPI_COMM_WORLD_RANK']
-    if 'OMPI_COMM_WORLD_SIZE' in os.environ:
-        os.environ["WORLD_SIZE"] = os.environ['OMPI_COMM_WORLD_SIZE']
-    if 'OMPI_COMM_WORLD_LOCAL_RANK' in os.environ:
-        os.environ["LOCAL_RANK"] = os.environ['OMPI_COMM_WORLD_LOCAL_RANK']
-
-    print('OS ENVIRON:', os.environ['MASTER_ADDR'], os.environ['MASTER_PORT'], os.environ['OMPI_COMM_WORLD_SIZE'], os.environ['OMPI_COMM_WORLD_RANK'], os.environ['LOCAL_RANK'])
-
-    torch.distributed.init_process_group(
-        backend="nccl", init_method="env://",
-        world_size=int(os.environ['OMPI_COMM_WORLD_SIZE']),
-        rank=int(os.environ['OMPI_COMM_WORLD_RANK'])
-    )
 
     main()

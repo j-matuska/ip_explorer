@@ -2,7 +2,6 @@ from .base import PLDataModuleWrapper
 
 import os
 import ast
-import numpy as np
 
 import schnetpack.transform as tform
 from schnetpack.data import AtomsLoader, AtomsDataFormat
@@ -17,7 +16,7 @@ class SchNetDataModule(PLDataModuleWrapper):
             stage (str):
                 Path to a directory containing the following files:
 
-                    * `full.db`: the formatted schnetpack.data.ASEAtomsData database
+                    *  `<database_name>.db`: the formatted schnetpack.data.ASEAtomsData database
                     * `split.npz`: the file specifying the train/val/test split indices
         """
         if 'cutoff' not in kwargs:
@@ -42,6 +41,17 @@ class SchNetDataModule(PLDataModuleWrapper):
             self.val_filename = kwargs['val_filename']
         else:
             self.val_filename = None
+            
+        # begin J. Matuska
+        if "database_name" in kwargs:
+            self.database_name = "{}.db".format(kwargs["database_name"])
+        else:
+            self.database_name = 'full.db'
+        if "load_properties" in kwargs:
+            self.load_properties = [kwargs["load_properties"]]
+        else:
+            self.load_properties = ['energy', 'forces']
+        # end J. Matuska
 
         super().__init__(stage=stage, **kwargs)
 
@@ -54,20 +64,23 @@ class SchNetDataModule(PLDataModuleWrapper):
         """
 
         transforms = [
+            tform.SubtractCenterOfMass(),
             tform.MatScipyNeighborList(cutoff=self.cutoff),
+            tform.CastTo32()
         ]
 
-        if self.remove_offsets:
-            transforms.insert(
-                0,
-                tform.RemoveOffsets('energy', remove_mean=True, remove_atomrefs=False)
-            )
+        # if self.remove_offsets:
+        #     transforms.insert(
+        #         0,
+        #         tform.RemoveOffsets('DS', remove_mean=True, remove_atomrefs=False)
+        #     )
+            
 
         datamodule = AtomsDataModule(
-            datapath=os.path.join(stage, 'full.db'),
+            datapath=os.path.join(stage, self.database_name), #datapath=os.path.join(stage, 'full.db'),
             split_file=os.path.join(stage, 'split.npz'),
             format=AtomsDataFormat.ASE,
-            load_properties=['energy', 'forces'],
+            load_properties=['DS'], #self.load_properties,
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             transforms=transforms,

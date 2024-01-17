@@ -1,5 +1,9 @@
 # Overview
 
+This package is modification of original package from jvita/ip_explorer.
+Interface to SchNetPack database file added as used in paper xxxxxxxx
+
+
 This package is intended to be used as a toolbox to aid in the development,
 analysis, and benchmarking of interatomic potentials (IPs).
 

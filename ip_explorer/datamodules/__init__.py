@@ -1,8 +1,8 @@
 from .schnet import SchNetDataModule
-from .nequip import NequIPDataModule
-from .ace import ACEDataModule
-from .mace import MACEDataModule
-from .ase import ASEDataModule
+# from .nequip import NequIPDataModule
+# from .ace import ACEDataModule
+# from .mace import MACEDataModule
+# from .ase import ASEDataModule
 from .test import TestDataModule
 
 
@@ -10,13 +10,13 @@ implemented_datamodules = {
     'test':         TestDataModule,
     'schnet':       SchNetDataModule,
     'painn':        SchNetDataModule,
-    'nequip':       NequIPDataModule,
-    'allegro':      NequIPDataModule,
-    'ace':          ACEDataModule,
-    'mace':         MACEDataModule,
-    'valle-oganov': ASEDataModule,
-    'vgop':         ASEDataModule,
-    'soap':         ASEDataModule,
+    # 'nequip':       NequIPDataModule,
+    # 'allegro':      NequIPDataModule,
+    # 'ace':          ACEDataModule,
+    # 'mace':         MACEDataModule,
+    # 'valle-oganov': ASEDataModule,
+    # 'vgop':         ASEDataModule,
+    # 'soap':         ASEDataModule,
 }
 
 def get_datamodule_wrapper(datamodule_type):

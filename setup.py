@@ -2,8 +2,8 @@ from setuptools import setup, find_packages
 
 setup(
     name = "ip_explorer",
-    version = "0.0.1",
-    author = "Josh Vita",
+    version = "0.0.1.1",
+    author = "Josh Vita, J. Matuska",
     description = ("A package for facilitating model exploration"),
     license = "BSD",
     keywords = "interatomic potentials potential energy surfaces loss landscapes",
